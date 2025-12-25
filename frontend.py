@@ -6,7 +6,11 @@ from dotenv import load_dotenv
 import os
 
 load_dotenv()
+tesing_mode= True
+st.session_state.cansend = False
 BACKEND_URL = os.getenv("BACKEND_URL")
+if tesing_mode:
+    BACKEND_URL = "http://localhost:8000/"
 st.set_page_config(page_title="Cerbet's website", layout="wide")
 
 if 'token' not in st.session_state:
@@ -213,7 +217,71 @@ def feed_page():
         st.error("Network error while loading feed.")
 
 
-# --- Вспомогательные функции трансформации (без изменений) ---
+def ai_page():
+    st.title("🤖 AI Assistant")
+
+    if "messages" not in st.session_state:
+        st.session_state.messages = []
+
+    for message in st.session_state.messages:
+        with st.chat_message(message["role"]):
+            st.markdown(message["content"])
+
+    if prompt := st.chat_input("Спросите что-нибудь у ИИ...",disabled=st.session_state.cansend):
+
+        with st.chat_message("user", avatar=st.session_state.user['profile_page']["url"],):
+            st.markdown(prompt)
+
+        with st.chat_message("assistant"):
+
+            st.session_state.cansend = True
+
+            message_placeholder = st.empty()
+            message_placeholder.markdown("Thinking...")
+
+            try:
+                payload = {
+                    "messages": [
+                        {"content":prompt}
+                    ]
+                }
+                response = requests.post(
+                    f"{BACKEND_URL}/ai/chat",
+
+                    json=payload,
+                    headers=get_headers()
+                )
+
+                if response.status_code == 200:
+                    full_response = response.json().get("reply", "No response from AI.")
+                    print(f"DEBUG: AI Response received successfully.")
+
+                    message_placeholder.markdown(full_response)
+                    st.session_state.messages.append({"role": "user", "content": prompt})
+                    st.session_state.messages.append({"role": "assistant", "content": full_response})
+                else:
+                    error_msg = f"Error {response.status_code}: {response.text}"
+                    print(f"ERROR: AI request failed. {error_msg}")
+                    message_placeholder.markdown("⚠️ Sorry, I couldn't process that request.")
+                    st.error(error_msg)
+
+            except Exception as e:
+                print(f"CRITICAL: AI Page Connection Error: {e}")
+                message_placeholder.markdown("❌ Connection error.")
+                st.error("Could not reach the AI server.")
+            finally:
+                print("Труанули")
+                st.session_state.cansend  = False
+                st.rerun()
+
+    if st.sidebar.button("Clear Chat History"):
+        st.session_state.messages = []
+        print("DEBUG: Chat history cleared.")
+        st.rerun()
+
+
+
+
 def encode_text_for_overlay(text):
     if not text: return ""
     base64_text = base64.b64encode(text.encode('utf-8')).decode('utf-8')
@@ -240,6 +308,7 @@ def create_transformed_url(original_url, transformation_params, caption=None):
 if st.session_state.user is None:
     login_page()
 else:
+
     st.sidebar.title(f"👋 Hi {st.session_state.user.get('email', 'User')}!")
     global avatar_placeholder
     avatar_placeholder = st.sidebar.empty()
@@ -253,11 +322,13 @@ else:
         st.rerun()
 
     st.sidebar.markdown("---")
-    page = st.sidebar.radio("Navigate:", ["🏠 Feed", "📸 Upload", "👤 Profile Settings"])
+    page = st.sidebar.radio("Navigate:", ["🏠 Feed", "📸 Upload", "👤 Profile Settings","🤖 AI"])
 
     if page == "🏠 Feed":
         feed_page()
     elif page == "👤 Profile Settings":
         profile_page()
+    elif page == "🤖 AI":
+        ai_page()
     else:
         upload_page()
