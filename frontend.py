@@ -6,7 +6,7 @@ from dotenv import load_dotenv
 import os
 
 load_dotenv()
-tesing_mode= True
+tesing_mode= False
 st.session_state.cansend = False
 BACKEND_URL = os.getenv("BACKEND_URL")
 if tesing_mode:
