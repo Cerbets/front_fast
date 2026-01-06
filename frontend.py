@@ -4,9 +4,10 @@ import base64
 import urllib.parse
 from dotenv import load_dotenv
 import os
-
+import json
+#python -m streamlit run frontend.py
 load_dotenv()
-tesing_mode= False
+tesing_mode= True
 st.session_state.cansend = False
 BACKEND_URL = os.getenv("BACKEND_URL")
 if tesing_mode:
@@ -49,6 +50,23 @@ def profile_image():
         avatar_placeholder.markdown(f'<img src="{avatar_url}" class="profile-pic">', unsafe_allow_html=True)
 
 
+@st.dialog("Доступ ограничен")
+def rate_limit_dialog(seconds):
+    st.warning(f"Вы отправили слишком много запросов.ПОМНИТЕ,ЭТО ПЕТ ПРОЭКТ,НЕ НАДО СПАМИТЬ!")
+    st.write(f"Ваш IP для регистрации временно заблокирован в целях безопасности.")
+    st.info(f"Осталось подождать: **{seconds // 60} мин. {seconds % 60} сек.**")
+
+    if st.button("Понятно", use_container_width=True):
+        st.rerun()
+
+@st.dialog("Доступ ограничен")
+def send_alert(message1,message2,message3):
+    st.warning(message1)
+    st.write(message2)
+    st.info(message3)
+
+    if st.button("Okay", use_container_width=True):
+        st.rerun()
 def login_page():
     st.title("🚀 Welcome to Simple Social")
 
@@ -62,24 +80,14 @@ def login_page():
             if st.button("Login", type="primary", use_container_width=True):
                 login_data = {"username": email, "password": password}
                 try:
-                    response = requests.post(f"{BACKEND_URL}/auth/jwt/login", data=login_data)
+                    response = requests.post(f"{BACKEND_URL}/auth/login", data=login_data)
                     if response.status_code == 200:
                         token_data = response.json()
                         st.session_state.token = token_data["access_token"]
-
-                        user_response = requests.get(f"{BACKEND_URL}/users/me", headers=get_headers())
-                        if user_response.status_code == 200:
-                            st.session_state.user = user_response.json()
-                            print(f"DEBUG: Login success for {email}")
-                            st.rerun()
-                        else:
-                            print(
-                                f"ERROR: Get user info failed. Status: {user_response.status_code}, Response: {user_response.text}")
-                            st.error("Failed to get user info")
-                    else:
-                        print(f"ERROR: Login failed. Status: {response.status_code}, Response: {response.text}")
-                        st.error("Invalid email or password!")
+                        st.session_state.user = {"email": email, "id" : token_data["id"] }
+                        st.rerun()
                 except Exception as e:
+
                     print(f"CRITICAL: Connection error during login: {e}")
                     st.error("Could not connect to backend.")
 
@@ -87,14 +95,21 @@ def login_page():
             if st.button("Sign Up", type="secondary", use_container_width=True):
                 signup_data = {"email": email, "password": password}
                 try:
-                    response = requests.post(f"{BACKEND_URL}/auth/register", json=signup_data)
+                    response =  crequests.post(f"{BACKEND_URL}/auth/register", json=signup_data)
                     if response.status_code == 201:
                         print(f"DEBUG: User {email} registered successfully.")
-                        st.success("Account created! Click Login now.")
+                        st.success("Account created! Check email to activate your account.")
+                    elif response.status_code == 400:
+                        st.error("Account already exists!")
+                    elif response.status_code == 401:
+                        st.error("Check your email to activate your account. If you don't receive it, you can request a new code in 15 minutes.")
                     else:
-                        print(f"ERROR: Registration failed. Status: {response.status_code}, Response: {response.text}")
-                        error_detail = response.json().get("detail", "Registration failed")
-                        st.error(f"Registration failed: {error_detail}")
+
+                        data = json.loads(response.text)
+                        print(data.get("detail", {}))
+                        ttl_seconds = data.get("detail", {}).get("retry_after_seconds", 0)
+
+                        rate_limit_dialog(ttl_seconds)
                 except Exception as e:
                     print(f"CRITICAL: Connection error during signup: {e}")
                     st.error("Could not connect to backend.")
@@ -121,6 +136,8 @@ def upload_page():
                     print(f"ERROR: Upload failed. Status: {response.status_code}, Response: {response.text}")
                     st.error(f"Upload failed! (Error {response.status_code})")
             except Exception as e:
+
+
                 print(f"CRITICAL: Connection error during upload: {e}")
                 st.error("Upload error.")
 
@@ -202,13 +219,16 @@ def feed_page():
                                 st.error("Failed to delete post!")
 
                 caption = post.get('caption', '')
-                if post['file_type'] in ['.jpg', '.jpeg', '.png', '.webm']:
+                url = post['url'].lower()
+                if url.endswith(('.jpg', '.jpeg', '.png', '.webp')):
                     uniform_url = create_transformed_url(post['url'], "", caption)
-                    st.image(uniform_url, width=300)
-                else:
+                    st.image(uniform_url, width=300, caption=caption)
+
+                elif url.endswith(('.webm', '.mp4', '.ogv')):
                     uniform_video_url = create_transformed_url(post['url'], "w-400,h-200,cm-pad_resize,bg-blurred")
                     st.video(uniform_video_url)
-                    st.caption(caption)
+                    if caption:
+                        st.caption(caption)
         else:
             print(f"ERROR: Could not load feed. Status: {response.status_code}, Response: {response.text}")
             st.error("Failed to load feed")
@@ -304,10 +324,34 @@ def create_transformed_url(original_url, transformation_params, caption=None):
         return original_url
 
 
-# --- Главная логика приложения ---
 if st.session_state.user is None:
+    query_params = st.query_params
+
+    if "email" in query_params and "code" in query_params:
+        email = query_params["email"]
+        print("Here")
+        code = query_params["code"]
+
+
+        with st.spinner("Activating your account..."):
+                try:
+                    response = requests.get(
+                        f"{BACKEND_URL}/auth/verify",
+                        params={"email": email, "code": code}
+                    )
+
+                    if response.status_code == 200:
+                        st.success("Succesfully activated!Please Login now")
+                        st.session_state["verified"] = True
+                        st.query_params.clear()
+                    else:
+                        st.error(f"Error:: {response.json().get('detail')}")
+                except Exception as e:
+                    st.error(f"Couldn't connect to backend: {e}")
+        st.query_params.clear()
     login_page()
 else:
+
 
     st.sidebar.title(f"👋 Hi {st.session_state.user.get('email', 'User')}!")
     global avatar_placeholder
