@@ -95,7 +95,8 @@ def login_page():
             if st.button("Sign Up", type="secondary", use_container_width=True):
                 signup_data = {"email": email, "password": password}
                 try:
-                    response =  crequests.post(f"{BACKEND_URL}/auth/register", json=signup_data)
+                    response =  requests.post(f"{BACKEND_URL}/auth/register", json=signup_data)
+                    print(response.status_code)
                     if response.status_code == 201:
                         print(f"DEBUG: User {email} registered successfully.")
                         st.success("Account created! Check email to activate your account.")
@@ -104,12 +105,13 @@ def login_page():
                     elif response.status_code == 401:
                         st.error("Check your email to activate your account. If you don't receive it, you can request a new code in 15 minutes.")
                     else:
-
-                        data = json.loads(response.text)
-                        print(data.get("detail", {}))
-                        ttl_seconds = data.get("detail", {}).get("retry_after_seconds", 0)
-
-                        rate_limit_dialog(ttl_seconds)
+                        st.error("Server Error.Please try again later.")
+                        # data = json.loads(response.text)
+                        # print(data)
+                        # print(data.get("detail", {}))
+                        # ttl_seconds = data.get("detail", {}).get("retry_after_seconds", 0)
+                        #
+                        # rate_limit_dialog(ttl_seconds)
                 except Exception as e:
                     print(f"CRITICAL: Connection error during signup: {e}")
                     st.error("Could not connect to backend.")
