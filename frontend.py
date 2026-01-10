@@ -251,7 +251,7 @@ def ai_page():
 
     if prompt := st.chat_input("Спросите что-нибудь у ИИ...",disabled=st.session_state.cansend):
 
-        with st.chat_message("user", avatar=st.session_state.user['profile_page']["url"],):
+        with st.chat_message("user"):#, avatar=st.session_state.user['profile_page']["url"],
             st.markdown(prompt)
 
         with st.chat_message("assistant"):
