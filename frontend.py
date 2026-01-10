@@ -68,7 +68,7 @@ def send_alert(message1,message2,message3):
     if st.button("Okay", use_container_width=True):
         st.rerun()
 def login_page():
-    st.title("🚀 Welcome to Simple Social")
+    st.title("🚀 Welcome to Cerbets community")
 
     email = st.text_input("Email:")
     password = st.text_input("Password:", type="password")
