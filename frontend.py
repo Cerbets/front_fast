@@ -5,376 +5,312 @@ import urllib.parse
 from dotenv import load_dotenv
 import os
 import json
-#python -m streamlit run frontend.py
+import time
+import websocket
+import threading
 load_dotenv()
-tesing_mode= False
-st.session_state.cansend = False
-BACKEND_URL = os.getenv("BACKEND_URL")
-if tesing_mode:
-    BACKEND_URL = "http://localhost:8000/"
-st.set_page_config(page_title="Cerbet's website", layout="wide")
+from streamlit.runtime.scriptrunner import add_script_run_ctx,get_script_run_ctx
+import streamlit.components.v1 as components
+testing_mode = False
+BACKEND_URL = os.getenv("BACKEND_URL", "http://localhost:8000")
+if testing_mode:
+    BACKEND_URL = "http://localhost:8000"
+
+st.set_page_config(page_title="Cerbet's Community", layout="wide")
 
 if 'token' not in st.session_state:
     st.session_state.token = None
 if 'user' not in st.session_state:
     st.session_state.user = None
+if 'cansend' not in st.session_state:
+    st.session_state.cansend = False
+
 
 
 def get_headers():
-    """Get authorization headers with token"""
     if st.session_state.token:
         return {"Authorization": f"Bearer {st.session_state.token}"}
     return {}
 
 
-def profile_image():
-    if st.session_state.user and st.session_state.user.get('profile_page'):
-        avatar_url = st.session_state.user['profile_page']["url"]
-        st.markdown(
-            """
-            <style>
-            .profile-pic {
-                display: block;
-                margin-left: auto;
-                margin-right: auto;
-                width: 150px;
-                height: 150px;
-                border-radius: 50%;
-                object-fit: cover;
-                border: 2px solid #eee;
-            }
-            </style>
-            """,
-            unsafe_allow_html=True,
-        )
-        avatar_placeholder.markdown(f'<img src="{avatar_url}" class="profile-pic">', unsafe_allow_html=True)
-
-
-@st.dialog("Доступ ограничен")
-def rate_limit_dialog(seconds):
-    st.warning(f"Вы отправили слишком много запросов.ПОМНИТЕ,ЭТО ПЕТ ПРОЭКТ,НЕ НАДО СПАМИТЬ!")
-    st.write(f"Ваш IP для регистрации временно заблокирован в целях безопасности.")
-    st.info(f"Осталось подождать: **{seconds // 60} мин. {seconds % 60} сек.**")
-
-    if st.button("Понятно", use_container_width=True):
-        st.rerun()
-
-@st.dialog("Доступ ограничен")
-def send_alert(message1,message2,message3):
-    st.warning(message1)
-    st.write(message2)
-    st.info(message3)
-
-    if st.button("Okay", use_container_width=True):
-        st.rerun()
-def login_page():
-    st.title("🚀 Welcome to Cerbets community")
-
-    email = st.text_input("Email:")
-    password = st.text_input("Password:", type="password")
-
-    if email and password:
-        col1, col2 = st.columns(2)
-
-        with col1:
-            if st.button("Login", type="primary", use_container_width=True):
-                login_data = {"username": email, "password": password}
-                try:
-                    response = requests.post(f"{BACKEND_URL}/auth/login", data=login_data)
-                    if response.status_code == 200:
-                        token_data = response.json()
-                        st.session_state.token = token_data["access_token"]
-                        st.session_state.user = {"email": email, "id" : token_data["id"] }
-                        st.rerun()
-                except Exception as e:
-
-                    print(f"CRITICAL: Connection error during login: {e}")
-                    st.error("Could not connect to backend.")
-
-        with col2:
-            if st.button("Sign Up", type="secondary", use_container_width=True):
-                signup_data = {"email": email, "password": password}
-                try:
-                    response =  requests.post(f"{BACKEND_URL}/auth/register", json=signup_data)
-                    print(response.status_code)
-                    if response.status_code == 201:
-                        print(f"DEBUG: User {email} registered successfully.")
-                        st.success("Account created! Check email to activate your account.")
-                    elif response.status_code == 400:
-                        st.error("Account already exists!")
-                    elif response.status_code == 401:
-                        st.error("Check your email to activate your account. If you don't receive it, you can request a new code in 15 minutes.")
-                    else:
-                        st.error("Server Error.Please try again later.")
-                        # data = json.loads(response.text)
-                        # print(data)
-                        # print(data.get("detail", {}))
-                        # ttl_seconds = data.get("detail", {}).get("retry_after_seconds", 0)
-                        #
-                        # rate_limit_dialog(ttl_seconds)
-                except Exception as e:
-                    print(f"CRITICAL: Connection error during signup: {e}")
-                    st.error("Could not connect to backend.")
-    else:
-        st.info("Enter your email and password above")
-
-
-def upload_page():
-    st.title("📸 Share Something")
-
-    uploaded_file = st.file_uploader("Choose media", type=['png', 'jpg', 'jpeg', 'mp4', 'avi', 'mov', 'mkv', 'webm'])
-    caption = st.text_area("Caption:", placeholder="What's on your mind?")
-
-    if uploaded_file and st.button("Share", type="primary"):
-        with st.spinner("Uploading..."):
-            files = {"file": (uploaded_file.name, uploaded_file.getvalue(), uploaded_file.type)}
-            data = {"caption": caption}
-            try:
-                response = requests.post(f"{BACKEND_URL}/upload", files=files, data=data, headers=get_headers())
-                if response.status_code == 200:
-                    print("DEBUG: Upload successful.")
-                    st.success("Posted!")
-                else:
-                    print(f"ERROR: Upload failed. Status: {response.status_code}, Response: {response.text}")
-                    st.error(f"Upload failed! (Error {response.status_code})")
-            except Exception as e:
-
-
-                print(f"CRITICAL: Connection error during upload: {e}")
-                st.error("Upload error.")
-
-
-def profile_page():
-    st.title("👤 Profile Settings")
-    uploaded_file = st.file_uploader("Choose profile's avatar", type=['png', 'jpg', 'jpeg'])
-
-    if uploaded_file:
-        col1, col2, col3 = st.columns([1, 1, 1])
-        with col2:
-            st.markdown(
-                """
-                <style>
-                .profile-pic {
-                    display: block; margin-left: auto; margin-right: auto;
-                    width: 150px; height: 150px; border-radius: 50%;
-                    object-fit: cover; border: 2px solid #eee;
-                }
-                </style>
-                """,
-                unsafe_allow_html=True,
-            )
-            bytes_data = uploaded_file.getvalue()
-            base64_image = base64.b64encode(bytes_data).decode()
-            st.markdown(f'<img src="data:image/png;base64,{base64_image}" class="profile-pic">', unsafe_allow_html=True)
-
-    if uploaded_file and st.button("Share", type="primary", use_container_width=True):
-        with st.spinner("Uploading..."):
-            files = {"file": (uploaded_file.name, uploaded_file.getvalue(), uploaded_file.type)}
-            try:
-                response = requests.post(f"{BACKEND_URL}/profile_update", files=files, headers=get_headers())
-                if response.status_code == 200:
-                    data = response.json()
-                    new_avatar_url = data.get("url")
-                    print(f"DEBUG: Profile updated. New avatar: {new_avatar_url}")
-
-                    if 'profile_page' not in st.session_state.user or st.session_state.user['profile_page'] is None:
-                        st.session_state.user['profile_page'] = {}
-
-                    st.session_state.user['profile_page']['url'] = new_avatar_url
-                    st.success("Posted!")
-                    profile_image()
-                else:
-                    print(f"ERROR: Profile update failed. Status: {response.status_code}, Response: {response.text}")
-                    st.error("Upload failed!")
-            except Exception as e:
-                print(f"CRITICAL: Profile update exception: {e}")
-                st.error("Error updating profile.")
-
-
-def feed_page():
-    st.title("🏠 Feed")
-    try:
-        response = requests.get(f"{BACKEND_URL}/feed", headers=get_headers())
-        if response.status_code == 200:
-            posts = response.json().get("posts", [])
-            print(f"DEBUG: Loaded {len(posts)} posts.")
-
-            if not posts:
-                st.info("No posts yet! Be the first to share something.")
-                return
-
-            for post in posts:
-                st.markdown("---")
-                col1, col2 = st.columns([4, 1])
-                with col1:
-                    st.markdown(f"**{post['email']}** • {post['created_at'][:10]}")
-                with col2:
-                    if post.get('is_owner', False):
-                        if st.button("🗑️", key=f"delete_{post['id']}", help="Delete post"):
-                            del_resp = requests.delete(f"{BACKEND_URL}/posts/{post['id']}", headers=get_headers())
-                            if del_resp.status_code == 200:
-                                print(f"DEBUG: Deleted post {post['id']}")
-                                st.success("Post deleted!")
-                                st.rerun()
-                            else:
-                                print(f"ERROR: Delete post {post['id']} failed. Status: {del_resp.status_code}")
-                                st.error("Failed to delete post!")
-
-                caption = post.get('caption', '')
-                url = post['url'].lower()
-                if url.endswith(('.jpg', '.jpeg', '.png', '.webp')):
-                    uniform_url = create_transformed_url(post['url'], "", caption)
-                    st.image(uniform_url, width=300, caption=caption)
-
-                elif url.endswith(('.webm', '.mp4', '.ogv')):
-                    uniform_video_url = create_transformed_url(post['url'], "w-400,h-200,cm-pad_resize,bg-blurred")
-                    st.video(uniform_video_url)
-                    if caption:
-                        st.caption(caption)
-        else:
-            print(f"ERROR: Could not load feed. Status: {response.status_code}, Response: {response.text}")
-            st.error("Failed to load feed")
-    except Exception as e:
-        print(f"CRITICAL: Feed exception: {e}")
-        st.error("Network error while loading feed.")
-
-
-def ai_page():
-    st.title("🤖 AI Assistant")
-
-    if "messages" not in st.session_state:
-        st.session_state.messages = []
-
-    for message in st.session_state.messages:
-        with st.chat_message(message["role"]):
-            st.markdown(message["content"])
-
-    if prompt := st.chat_input("Спросите что-нибудь у ИИ...",disabled=st.session_state.cansend):
-
-        with st.chat_message("user"):#, avatar=st.session_state.user['profile_page']["url"],
-            st.markdown(prompt)
-
-        with st.chat_message("assistant"):
-
-            st.session_state.cansend = True
-
-            message_placeholder = st.empty()
-            message_placeholder.markdown("Thinking...")
-
-            try:
-                payload = {
-                    "messages": [
-                        {"content":prompt}
-                    ]
-                }
-                response = requests.post(
-                    f"{BACKEND_URL}/ai/chat",
-
-                    json=payload,
-                    headers=get_headers()
-                )
-
-                if response.status_code == 200:
-                    full_response = response.json().get("reply", "No response from AI.")
-                    print(f"DEBUG: AI Response received successfully.")
-
-                    message_placeholder.markdown(full_response)
-                    st.session_state.messages.append({"role": "user", "content": prompt})
-                    st.session_state.messages.append({"role": "assistant", "content": full_response})
-                else:
-                    error_msg = f"Error {response.status_code}: {response.text}"
-                    print(f"ERROR: AI request failed. {error_msg}")
-                    message_placeholder.markdown("⚠️ Sorry, I couldn't process that request.")
-                    st.error(error_msg)
-
-            except Exception as e:
-                print(f"CRITICAL: AI Page Connection Error: {e}")
-                message_placeholder.markdown("❌ Connection error.")
-                st.error("Could not reach the AI server.")
-            finally:
-                print("Труанули")
-                st.session_state.cansend  = False
-                st.rerun()
-
-    if st.sidebar.button("Clear Chat History"):
-        st.session_state.messages = []
-        print("DEBUG: Chat history cleared.")
-        st.rerun()
-
-
-
-
-def encode_text_for_overlay(text):
-    if not text: return ""
-    base64_text = base64.b64encode(text.encode('utf-8')).decode('utf-8')
-    return urllib.parse.quote(base64_text)
-
-
 def create_transformed_url(original_url, transformation_params, caption=None):
     if caption:
-        encoded_caption = encode_text_for_overlay(caption)
-        text_overlay = f"l-text,ie-{encoded_caption},ly-N20,lx-20,fs-100,co-white,bg-000000A0,l-end"
-        transformation_params = text_overlay
+        encoded_caption = base64.b64encode(caption.encode('utf-8')).decode('utf-8')
+        encoded_caption = urllib.parse.quote(encoded_caption)
+        transformation_params = f"l-text,ie-{encoded_caption},ly-N20,lx-20,fs-100,co-white,bg-000000A0,l-end"
     if not transformation_params: return original_url
     try:
         parts = original_url.split("/")
-        imagekit_id = parts[3]
-        file_path = "/".join(parts[4:])
         base_url = "/".join(parts[:4])
+        file_path = "/".join(parts[4:])
         return f"{base_url}/tr:{transformation_params}/{file_path}"
     except:
         return original_url
 
 
-if st.session_state.user is None:
-    query_params = st.query_params
 
-    if "email" in query_params and "code" in query_params:
-        email = query_params["email"]
-        print("Here")
-        code = query_params["code"]
+def login_page():
+    st.title("🚀 Welcome to Cerbet's Community")
+    email = st.text_input("Email:")
+    password = st.text_input("Password:", type="password")
 
-
-        with st.spinner("Activating your account..."):
+    col1, col2 = st.columns(2)
+    if email and password:
+        with col1:
+            if st.button("Login", type="primary", use_container_width=True):
                 try:
-                    response = requests.get(
-                        f"{BACKEND_URL}/auth/verify",
-                        params={"email": email, "code": code}
-                    )
+
+                    response = requests.post(f"{BACKEND_URL}/auth/login", data={"username": email, "password": password})
 
                     if response.status_code == 200:
-                        st.success("Succesfully activated!Please Login now")
-                        st.session_state["verified"] = True
-                        st.query_params.clear()
-                    else:
-                        st.error(f"Error:: {response.json().get('detail')}")
+
+                        token_data = response.json()
+
+                        st.session_state.token = token_data["access_token"]
+
+                        st.session_state.user = {"email": email, "id": token_data["id"],
+                                                 "profile_page": token_data["profile_page"]}
+
+                        st.rerun()
+
                 except Exception as e:
-                    st.error(f"Couldn't connect to backend: {e}")
-        st.query_params.clear()
+
+                    print(f"CRITICAL: Connection error during login: {e}")
+
+                st.error("Could not connect to backend.")
+        with col2:
+            if st.button("Sign Up", use_container_width=True):
+                try:
+                    resp = requests.post(f"{BACKEND_URL}/auth/register", json={"email": email, "password": password})
+                    if resp.status_code == 201:
+                        st.success("Account created! Check email.")
+                    else:
+                        st.error("Registration failed")
+                except:
+                    st.error("Backend connection error")
+
+
+def feed_page():
+    st.title("🏠 Global Feed")
+    try:
+        resp = requests.get(f"{BACKEND_URL}/feed", headers=get_headers())
+        if resp.status_code == 200:
+            posts = resp.json().get("posts", [])
+            for post in posts:
+                with st.container(border=True):
+                    c1, c2 = st.columns([0.9, 0.1])
+                    c1.markdown(f"**{post['email']}** • {post['created_at'][:10]}")
+                    if post.get('is_owner'):
+                        if c2.button("🗑️", key=f"del_post_{post['id']}"):
+                            requests.delete(f"{BACKEND_URL}/posts/{post['id']}", headers=get_headers())
+                            st.rerun()
+
+                    url = post['url'].lower()
+                    if any(url.endswith(ext) for ext in ['.jpg', '.jpeg', '.png', '.webp']):
+                        st.image(create_transformed_url(post['url'], "", post.get('caption')), use_container_width=True)
+                    elif any(url.endswith(ext) for ext in ['.mp4', '.webm']):
+                        st.video(post['url'])
+                    if post.get('caption'): st.write(post['caption'])
+    except:
+        st.error("Failed to load feed")
+
+
+def chat_page():
+    st.title("💬 Community Chat")
+
+    if "needs_rerun" not in st.session_state:
+        st.session_state.needs_rerun = False
+
+    @st.fragment(run_every="1s")
+    def sync_trigger():
+        if st.session_state.needs_rerun:
+            st.toast("🔄 message received via WEBSOCKET")
+            st.session_state.needs_rerun = False
+            time.sleep(0.5)
+
+            st.rerun()
+
+    sync_trigger()
+
+    def on_message(ws, message):
+        st.session_state.needs_rerun = True
+
+    if "ws_connected" not in st.session_state:
+        ws_url = BACKEND_URL.replace("https", "ws") + "/ws"
+        ctx = get_script_run_ctx()
+
+        def run_ws(ctx):
+            add_script_run_ctx(threading.current_thread(), ctx)
+            ws = websocket.WebSocketApp(
+                ws_url,
+                on_message=on_message,
+                on_open=lambda ws: print("🚀 [WS] Соединение установлено!"),
+                on_error=lambda ws, err: print(f"🧨 [WS] Ошибка: {err}"),
+                on_close=lambda ws, status, msg: print(f"🔌 [WS] Закрыто: {msg}"),
+            )
+            ws.run_forever(ping_interval=20, ping_timeout=10)
+
+        thread = threading.Thread(target=run_ws, args=(ctx,), daemon=True)
+        thread.start()
+        st.session_state.ws_connected = True
+
+    try:
+        resp = requests.get(f"{BACKEND_URL}/messages/", headers=get_headers())
+        messages = resp.json().get("messages", []) if resp.status_code == 200 else []
+        messages.reverse()
+    except Exception as e:
+        st.error(f"Connection error: {e}")
+        messages = []
+
+    chat_container = st.container(height=500)
+    with chat_container:
+        for msg in messages:
+            is_me = msg.get("is_owner", False)
+            with st.chat_message("user" if is_me else "assistant"):
+                col1, col2 = st.columns([0.92, 0.08])
+                with col1:
+                    time_str = msg['created_at'][11:16]
+                    st.markdown(f"**{msg['email']}** <small>{time_str}</small>", unsafe_allow_html=True)
+                    st.write(msg['content'])
+                with col2:
+                    if is_me:
+                        if st.button("❌", key=f"msg_{msg['id']}"):
+                            requests.delete(f"{BACKEND_URL}/messages/",
+                                            json={"message_id": msg['id']},
+                                            headers=get_headers())
+                            st.rerun()
+
+    if prompt := st.chat_input("Type anything please..."):
+        try:
+            resp = requests.post(f"{BACKEND_URL}/messages/",
+                                 json={"content": prompt},
+                                 headers=get_headers())
+            if resp.status_code == 200:
+                st.toast(f"🔄 message sent")
+            else:
+                st.error(f"Ошибка: {resp.status_code}")
+        except Exception as e:
+            st.error(f"Failed to send: {e}")
+
+
+def profile_page():
+    st.title("👤 Profile Settings")
+    if st.session_state.user.get('profile_page'):
+        st.image(st.session_state.user['profile_page'], width=150)
+
+    uploaded_file = st.file_uploader("Change Avatar", type=['jpg', 'png', 'jpeg'])
+    if uploaded_file and st.button("Update Avatar"):
+        files = {"file": (uploaded_file.name, uploaded_file.getvalue(), uploaded_file.type)}
+        resp = requests.post(f"{BACKEND_URL}/profile_update", files=files, headers=get_headers())
+        if resp.status_code == 200:
+            st.session_state.user['profile_page'] = resp.json().get("url")
+            st.success("Updated!")
+            st.rerun()
+
+
+def ai_page():
+    st.title("🤖 AI Assistant")
+    if "ai_history" not in st.session_state: st.session_state.ai_history = []
+
+    for m in st.session_state.ai_history:
+        with st.chat_message(m["role"]): st.markdown(m["content"])
+
+    if prompt := st.chat_input("Ask AI...", disabled=st.session_state.cansend):
+        st.session_state.ai_history.append({"role": "user", "content": prompt})
+        with st.chat_message("user"):
+            st.markdown(prompt)
+
+        with st.chat_message("assistant"):
+            st.session_state.cansend = True
+            try:
+                resp = requests.post(f"{BACKEND_URL}/ai/chat", json={"messages": [{"content": prompt}]},
+                                     headers=get_headers())
+                if resp.status_code == 200:
+                    reply = resp.json().get("reply")
+                    st.markdown(reply)
+                    st.session_state.ai_history.append({"role": "assistant", "content": reply})
+            except:
+                st.error("AI unreachable")
+            st.session_state.cansend = False
+            st.rerun()
+
+
+
+if st.session_state.user is None:
     login_page()
+
+    query_params = st.query_params
+    if "email" in query_params and "code" in query_params:
+
+        email = query_params["email"]
+
+        print("Here")
+
+        code = query_params["code"]
+
+        with st.spinner("Activating your account..."):
+
+            try:
+
+                response = requests.get(
+
+                    f"{BACKEND_URL}/auth/verify",
+
+                    params={"email": email, "code": code}
+
+                )
+
+                if response.status_code == 200:
+
+                    st.success("Succesfully activated!Please Login now")
+
+                    st.session_state["verified"] = True
+
+                    st.query_params.clear()
+
+                else:
+
+                    st.error(f"Error:: {response.json().get('detail')}")
+
+            except Exception as e:
+
+                    st.error(f"Couldn't connect to backend: {e}")
+
+                    st.query_params.clear()
+
+                    login_page()
+
 else:
-
-
-    st.sidebar.title(f"👋 Hi {st.session_state.user.get('email', 'User')}!")
-    global avatar_placeholder
-    avatar_placeholder = st.sidebar.empty()
-
-    profile_image()
+    # Sidebar
+    st.sidebar.title(f"👋 {st.session_state.user['email']}")
+    if st.session_state.user.get('profile_page'):
+        st.sidebar.image(st.session_state.user['profile_page'], width=100)
 
     if st.sidebar.button("Logout"):
-        print(f"DEBUG: User logged out.")
         st.session_state.user = None
         st.session_state.token = None
         st.rerun()
 
     st.sidebar.markdown("---")
-    page = st.sidebar.radio("Navigate:", ["🏠 Feed", "📸 Upload", "👤 Profile Settings","🤖 AI"])
+    page = st.sidebar.radio("Go to:", ["🏠 Feed", "💬 Community Chat", "📸 Upload", "👤 Profile", "🤖 AI"])
+
 
     if page == "🏠 Feed":
         feed_page()
-    elif page == "👤 Profile Settings":
+    elif page == "💬 Community Chat":
+
+        chat_page()
+    elif page == "📸 Upload":
+        st.title("📸 Upload")
+        f = st.file_uploader("Media")
+        c = st.text_area("Caption")
+        if f and st.button("Post"):
+            files = {"file": (f.name, f.getvalue(), f.type)}
+            requests.post(f"{BACKEND_URL}/upload", files=files, data={"caption": c}, headers=get_headers())
+            st.success("Done!")
+    elif page == "👤 Profile":
         profile_page()
     elif page == "🤖 AI":
         ai_page()
-    else:
-        upload_page()
+
+        # python -m streamlit run frontend.py
